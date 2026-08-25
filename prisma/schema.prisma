@@ -1,0 +1,143 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Ported/trimmed from F:\SassFactory\crm3-micro's Lead (id, firstName,
+// lastName, email, phone, company, industry, country, city, source, status,
+// notes) — this is crm3-micro's own intake-lead concept (a prospective
+// client who hasn't retained the firm yet), unrelated to leadMarketing's
+// scraped-Lead. tenantId/assignedTo/companyId/linkedinUrl/companySize
+// dropped (multi-tenant/agency fields a single small firm doesn't need).
+model Lead {
+  id        Int       @id @default(autoincrement())
+  name      String
+  email     String?
+  phone     String?
+  notes     String?
+  status    String    @default("new") // new | contacted | qualified | converted | lost
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  @@map("leads")
+}
+
+model Client {
+  id        Int       @id @default(autoincrement())
+  name      String
+  email     String?
+  phone     String?
+  notes     String?
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  matters Matter[]
+
+  @@map("clients")
+}
+
+// The "matter tracking" half of the pitch — this catalog's equivalent of
+// Project CRM (#08)'s Proposal-derived Phase, renamed to the domain's own
+// term. type is free text ("litigation", "contract review", "estate
+// planning" ...) rather than an enum, matching every other CRM's category
+// fields in this catalog.
+model Matter {
+  id        Int       @id @default(autoincrement())
+  clientId  Int
+  title     String
+  type      String?
+  status    String    @default("open") // open | closed
+  openedAt  DateTime  @default(now())
+  closedAt  DateTime?
+  notes     String?
+  createdAt DateTime  @default(now())
+
+  client    Client     @relation(fields: [clientId], references: [id])
+  groups    TaskGroup[]
+  contracts Contract[]
+  invoices  Invoice[]
+
+  @@map("matters")
+}
+
+// Ported/trimmed from crm3-micro's TaskGroup+Task+GroupTask (prisma/schema.
+// prisma:1810-1857) — a checklist container per matter, same "inline N-step
+// checklist" shape Garage CRM (#06) already established for jobs. Task's
+// recurrenceType/recurrencePeriod fields dropped here (a matter checklist
+// item is a one-off "did we do this," not recurring — Never-Forget CRM
+// (#23) is where that half of crm3-micro's Task model gets reused instead).
+model TaskGroup {
+  id        Int      @id @default(autoincrement())
+  matterId  Int
+  name      String
+  createdAt DateTime @default(now())
+
+  matter Matter         @relation(fields: [matterId], references: [id])
+  tasks  ChecklistTask[]
+
+  @@map("task_groups")
+}
+
+model ChecklistTask {
+  id        Int       @id @default(autoincrement())
+  groupId   Int
+  title     String
+  status    String    @default("pending") // pending | done
+  dueDate   DateTime?
+  createdAt DateTime  @default(now())
+
+  group TaskGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@map("checklist_tasks")
+}
+
+// Collapsed from crm3-micro's Contract (prisma/schema.prisma:254) the same
+// way every other CRM in this catalog collapses it — dropped tenantId/
+// companyId/partnerId/employeeId multi-tenant fields, kept
+// title/type/dates/status/body. `retainerAmount` is new — the specific
+// "retainer billing" the pitch names, since crm3-micro's generic Contract
+// has no billing-amount field of its own (that lives on Invoice there too).
+model Contract {
+  id              Int       @id @default(autoincrement())
+  matterId        Int
+  title           String
+  retainerAmount  Decimal   @default(0)
+  status          String    @default("active") // active | ended
+  startDate       DateTime  @default(now())
+  endDate         DateTime?
+  body            String?
+  createdAt       DateTime  @default(now())
+
+  matter   Matter    @relation(fields: [matterId], references: [id])
+  invoices Invoice[]
+
+  @@map("contracts")
+}
+
+// Collapsed from crm3-micro's Invoice (prisma/schema.prisma:217) the same
+// way Garage CRM (#06) and Patient CRM (#07) already collapsed it — dropped
+// tenantId/companyId/partnerId/employeeId, kept amount/tax/total/dueDate/
+// paidAt/status. contractId optional so a matter can still be billed for
+// something outside the retainer (a one-off filing fee).
+model Invoice {
+  id         Int       @id @default(autoincrement())
+  matterId   Int
+  contractId Int?
+  number     String
+  amount     Decimal
+  tax        Decimal   @default(0)
+  total      Decimal
+  dueDate    DateTime
+  paidAt     DateTime?
+  status     String    @default("unpaid")
+  createdAt  DateTime  @default(now())
+
+  matter   Matter    @relation(fields: [matterId], references: [id])
+  contract Contract? @relation(fields: [contractId], references: [id])
+
+  @@map("invoices")
+}
